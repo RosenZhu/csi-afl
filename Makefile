@@ -1,5 +1,5 @@
 #
-# CSI-AFL - makefile
+# csi-fast - makefile
 # -----------------------------
 #
 # Written by Xiaogang Zhu <xiaogangzhu@swin.edu.au>
@@ -21,7 +21,7 @@
 
 # var- edit DYN_ROOT accordingly
 
-DYN_ROOT 	= /home/xgzhu/apps/buildDyn
+DYN_ROOT 	= /home/xgzhu/apps/dyninstShadow/thirdparty/dyninst-10.1.0/install
 # These should point to where libelf and libdwarf are installed
 LOCAL_INC = /usr/local/include
 LOCAL_LIBS = /usr/local/lib
@@ -52,7 +52,7 @@ MISC_PATH   = $(PREFIX)/share/afl
 
 # PROGS intentionally omit untracer-as, which gets installed elsewhere.
 
-PROGS       = csi-afl libCSIDyninst CSIDyninst afl-showmap
+PROGS       = csi-fast libCSIDyninst CSIDyninst afl-showmap
 SH_PROGS    = afl-plot
 
 CFLAGS     ?= -O3 -funroll-loops
@@ -86,7 +86,7 @@ endif
 
 # CSI dependencies
 
-csi-afl: csi-afl.c $(COMM_HDR) | test_x86
+csi-fast: csi-fast.c $(COMM_HDR) | test_x86
 	$(CC) $(CFLAGS) $@.c -o $@ $(LDFLAGS)
 
 libCSIDyninst: libCSIDyninst.cpp

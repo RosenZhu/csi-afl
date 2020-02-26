@@ -1,5 +1,6 @@
 # Overview
-CSI-Fuzz aims to fuzz binaries efficiently, which uses the idea of full-speed fuzzing. 
+CSI-Fast aims to fuzz binaries efficiently, which uses the idea of full-speed fuzzing. 
+It's based on [AFLFast](https://github.com/mboehme/aflfast), and adds a lower bound to its power schedule.
 
 The current version is for non-PIE binaries.
 
