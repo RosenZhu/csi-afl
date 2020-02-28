@@ -133,6 +133,7 @@ void initAflForkServer(u32 max_predtm, const char* marks_file, const char* indir
             
         }
 
+        trace_bits[2 * MAP_SIZE + BYTES_CKSUM_PATH + FLAG_LOOP] = 255; //reset it
         /* Parent - Fork off worker process that actually runs the benchmark. */
         fork_pid = fork();
         if(fork_pid < 0) {
@@ -187,6 +188,7 @@ void OraclePredtm(u32 predtm_id, const char* marks_file){
                 marks_io << predtm_id << endl; // use edge id as the mark id
                 marks_io.close();
             }
+            trace_bits[2 * MAP_SIZE + BYTES_CKSUM_PATH + FLAG_LOOP] = COND_COVERAGE;
             exit(COND_COVERAGE);
         }
         
@@ -275,6 +277,11 @@ void OracleIndirect(u64 src_addr, u64 des_addr, u32 max_map_size, u32 max_predtm
 
     }
     
+     /* in case the target program fork a new child */
+    u8 ec = trace_bits[2 * MAP_SIZE + BYTES_CKSUM_PATH + FLAG_LOOP];
+    if (ec == INDIRECT_COVERAGE || ec == COND_COVERAGE){
+        return;
+    }
     
     /* indirect edge does not exist --> find a new indirect edge;*/
 
@@ -286,13 +293,13 @@ void OracleIndirect(u64 src_addr, u64 des_addr, u32 max_map_size, u32 max_predtm
     if (cur_max_id >= max_map_size) cur_max_id = max_map_size - 1; //don't overflow
 
     indirect_ids.insert(make_pair(EDGE(src_addr, des_addr), cur_max_id));
-    // //save new edge into a file, for recovering fuzzing
-    // ofstream indaddrs;
-    // indaddrs.open (indirect_file, ios::out | ios::app | ios::binary); //write file
-    // if(indaddrs.is_open()){
-    //     indaddrs << src_addr << " " << des_addr << " " << cur_max_id << endl; 
-    //     indaddrs.close();
-    // }
+    //save new edge into a file, for recovering fuzzing
+    ofstream indaddrs;
+    indaddrs.open (indirect_file, ios::out | ios::app | ios::binary); //write file
+    if(indaddrs.is_open()){
+        indaddrs << src_addr << " " << des_addr << " " << cur_max_id << endl; 
+        indaddrs.close();
+    }
 
     // save the path mark to file
     ofstream marks_io (marks_file, ios::out | ios::app | ios::binary);
@@ -301,6 +308,7 @@ void OracleIndirect(u64 src_addr, u64 des_addr, u32 max_map_size, u32 max_predtm
         marks_io.close();
     }
 
+    trace_bits[2 * MAP_SIZE + BYTES_CKSUM_PATH + FLAG_LOOP] = INDIRECT_COVERAGE;
     exit(INDIRECT_COVERAGE);    
     
 }

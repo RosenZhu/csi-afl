@@ -21,6 +21,9 @@
 //bytes for recording the flags of loops
 #define FLAG_LOOP   1
 
+// byte for record exit code COND_COVERAGE or INDIRECT_COVERAGE
+#define BYTE_EXIT       1
+
 // give loops more air time
 #define LOOP_TIME   8
 

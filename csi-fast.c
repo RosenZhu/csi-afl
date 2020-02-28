@@ -97,7 +97,8 @@ EXP_ST s32 trimmer_fsrv_ctlFD,         /* Forkserver control pipes         */
            trimmer_child_PID;          /* Forkserver child PIDs            */
 
 
-EXP_ST u8 *pflag_loop,          /* contain a loop? 0: not; 1: yes */
+EXP_ST u8 *pexit_code,          /* record the exit code; in case the target program fork() a new child */
+          *pflag_loop,          /* contain a loop? 0: not; 1: yes */
           *flag_bits;           /* SHM with flags about whether an edge has been examined */
                               /* 255: not examined;  0: examined */
 EXP_ST u8* pcksum_path;     /* data for path checksum as an id */
@@ -1581,7 +1582,7 @@ EXP_ST void setup_shm(void) {
     MAP_SIZE ~ 2*MAP_SIZE - 1 : flag about whether an edge has been examined through all fuzzing time
     2*MAP_SIZE ~ 2*MAP_SIZE + 3: cksum of path id calculated from marks
    */
-  shm_id = shmget(IPC_PRIVATE, 2 * MAP_SIZE + BYTES_CKSUM_PATH + FLAG_LOOP, IPC_CREAT | IPC_EXCL | 0600);
+  shm_id = shmget(IPC_PRIVATE, 2 * MAP_SIZE + BYTES_CKSUM_PATH + FLAG_LOOP + BYTE_EXIT, IPC_CREAT | IPC_EXCL | 0600);
 
   if (shm_id < 0) PFATAL("shmget() failed");
 
@@ -1610,10 +1611,10 @@ EXP_ST void setup_shm(void) {
   pcksum_path = trace_bits + 2 * MAP_SIZE;
   /* loop flag */
   pflag_loop = trace_bits + 2 * MAP_SIZE + BYTES_CKSUM_PATH;
-  // /*initial set*/
-  // for (int i = 0; i < (CKSUM_PATH_SIZE + FLAG_LOOP); i++){
-  //   trace_bits[2 * MAP_SIZE + i] = 255;
-  // }
+  
+  /*exit code*/
+  pexit_code = trace_bits + 2 * MAP_SIZE + BYTES_CKSUM_PATH + FLAG_LOOP;
+  *pexit_code = 255;
 
 }
 
@@ -2314,7 +2315,13 @@ static u8 run_target(s32 * child_PID, s32 * fsrv_ctlFD, s32 * fsrv_stFD, u32 tim
       if (exit_status == INDIRECT_COVERAGE) return FAULT_INDIRECT;
   }
 
-
+  /* in case the target program fork a new child */
+  if ((*pexit_code) == COND_COVERAGE){
+    return FAULT_COND;
+  }
+  else if ((*pexit_code) == INDIRECT_COVERAGE){
+    return FAULT_INDIRECT;
+  }
 
   return FAULT_NONE;
 
@@ -7874,7 +7881,7 @@ int main(int argc, char** argv) {
     case EXPLORE: OKF ("Using exploration-based constant power schedule (EXPLORE)"); break;
     default : FATAL ("Unkown power schedule"); break;
   }
-  
+
   if (getenv("AFL_NO_CPU_RED"))    no_cpu_meter_red = 1;
   if (getenv("AFL_NO_ARITH"))      no_arith         = 1;
   if (getenv("AFL_SHUFFLE_QUEUE")) shuffle_queue    = 1;
