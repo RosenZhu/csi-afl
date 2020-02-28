@@ -1,5 +1,5 @@
 #
-# CSI-AFL - makefile
+# untracer-dyn - makefile
 # -----------------------------
 #
 # Written by Xiaogang Zhu <xiaogangzhu@swin.edu.au>
@@ -52,7 +52,7 @@ MISC_PATH   = $(PREFIX)/share/afl
 
 # PROGS intentionally omit untracer-as, which gets installed elsewhere.
 
-PROGS       = csi-afl libCSIDyninst CSIDyninst afl-showmap
+PROGS       = untracer-dyn libCSIDyninst CSIDyninst afl-showmap
 SH_PROGS    = afl-plot
 
 CFLAGS     ?= -O3 -funroll-loops
@@ -86,7 +86,7 @@ endif
 
 # CSI dependencies
 
-csi-afl: csi-afl.c $(COMM_HDR) | test_x86
+untracer-dyn: untracer-dyn.c $(COMM_HDR) | test_x86
 	$(CC) $(CFLAGS) $@.c -o $@ $(LDFLAGS)
 
 libCSIDyninst: libCSIDyninst.cpp

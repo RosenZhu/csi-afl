@@ -97,10 +97,8 @@ EXP_ST s32 trimmer_fsrv_ctlFD,         /* Forkserver control pipes         */
            trimmer_child_PID;          /* Forkserver child PIDs            */
 
 
-EXP_ST u8 *pflag_loop,          /* contain a loop? 0: not; 1: yes */
-          *flag_bits;           /* SHM with flags about whether an edge has been examined */
+EXP_ST u8 *flag_bits;           /* SHM with flags about whether an edge has been examined */
                               /* 255: not examined;  0: examined */
-EXP_ST u8* pcksum_path;     /* data for path checksum as an id */
 
 
 /* -------------- Untracer-AFL vars ------------------------------------- */
@@ -301,9 +299,6 @@ struct queue_entry {
 
   struct queue_entry *next,           /* Next element, if any             */
                      *next_100;       /* 100 elements ahead               */
-  
-  u32 path_cksum;             /* identifier for the path */
-  u8 is_loop;                 /* assign more energy for a loop: 0:not; 1:yes */
 
 };
 
@@ -996,7 +991,6 @@ static void add_to_queue(u8* fname, u32 len, u8 passed_det) {
   q->len          = len;
   q->depth        = cur_depth + 1;
   q->passed_det   = passed_det;
-  q->is_loop      = 0;
 
   if (q->depth > max_depth) max_depth = q->depth;
 
@@ -1071,7 +1065,7 @@ EXP_ST void write_bitmap(void) {
 
   if (fd < 0) PFATAL("Unable to open '%s'", fname);
 
-  ck_write(fd, flag_bits, MAP_SIZE, fname);
+  ck_write(fd, flag_bits, BYTES_FLAGS, fname);
 
   close(fd);
   ck_free(fname);
@@ -1558,11 +1552,7 @@ EXP_ST void setup_shm(void) {
 
   //shm_id = shmget(IPC_PRIVATE, MAP_SIZE, IPC_CREAT | IPC_EXCL | 0600);
 
-  /* 0 ~ MAP_SIZE - 1: bitmap
-    MAP_SIZE ~ 2*MAP_SIZE - 1 : flag about whether an edge has been examined through all fuzzing time
-    2*MAP_SIZE ~ 2*MAP_SIZE + 3: cksum of path id calculated from marks
-   */
-  shm_id = shmget(IPC_PRIVATE, 2 * MAP_SIZE + BYTES_CKSUM_PATH + FLAG_LOOP, IPC_CREAT | IPC_EXCL | 0600);
+  shm_id = shmget(IPC_PRIVATE, MAP_SIZE + BYTES_FLAGS, IPC_CREAT | IPC_EXCL | 0600);
 
   if (shm_id < 0) PFATAL("shmget() failed");
 
@@ -1585,16 +1575,9 @@ EXP_ST void setup_shm(void) {
 
   /* setup flag_bits for mimicing re-instrument;  rosen*/
   flag_bits = trace_bits + MAP_SIZE;
-  memset(flag_bits, 255, MAP_SIZE);
+  memset(flag_bits, 255, BYTES_FLAGS);
 
-  /* for calculating path cksum */
-  pcksum_path = trace_bits + 2 * MAP_SIZE;
-  /* loop flag */
-  pflag_loop = trace_bits + 2 * MAP_SIZE + BYTES_CKSUM_PATH;
-  // /*initial set*/
-  // for (int i = 0; i < (CKSUM_PATH_SIZE + FLAG_LOOP); i++){
-  //   trace_bits[2 * MAP_SIZE + i] = 255;
-  // }
+ 
 
 }
 
@@ -2208,9 +2191,7 @@ static u8 run_target(s32 * child_PID, s32 * fsrv_ctlFD, s32 * fsrv_stFD, u32 tim
      territory. */
 
   memset(trace_bits, 0, MAP_SIZE);
-  memset(pcksum_path, 0, BYTES_CKSUM_PATH); //rosen
-  // for loop flag
-  trace_bits[2 * MAP_SIZE + BYTES_CKSUM_PATH] = 0;  // not a loop
+  
   MEM_BARRIER();
 
   /* Forkserver is up, so tell it to have at it (control pipe), then read back PID. 
@@ -2289,10 +2270,8 @@ static u8 run_target(s32 * child_PID, s32 * fsrv_ctlFD, s32 * fsrv_stFD, u32 tim
   if (WIFEXITED(status) && !stop_soon) { 
       int exit_status = WEXITSTATUS(status);
       /* meet new coverage with conditional jumps, special exit status */         
-      if (exit_status == COND_COVERAGE) return FAULT_COND;
+      if (exit_status == BLOCK_EXIT) return FAULT_COND;
 
-      /* meet new coverage with indirect jumps/calls, special exit status */
-      if (exit_status == INDIRECT_COVERAGE) return FAULT_INDIRECT;
   }
 
 
@@ -2735,10 +2714,7 @@ void init_path_marks(){
         start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); 
         fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, exec_tmout);
         stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD);
-        
-        q->path_cksum = hash32(pcksum_path, BYTES_CKSUM_PATH, HASH_CONST);
-        q->is_loop = *pflag_loop;
-
+    
         total_traced++;
         total_queued++;
         // update coverage information in oracle: just restart the forkserver
@@ -3140,9 +3116,7 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
 
     //path cksum
     queue_top->exec_cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST); //rosen
-    queue_top->path_cksum = hash32(pcksum_path, BYTES_CKSUM_PATH, HASH_CONST);
-    queue_top->is_loop = *pflag_loop;
-
+ 
     total_traced++;
 
     // restart oracle to update coverage information;
@@ -4269,10 +4243,9 @@ static void show_stats(void) {
   SAYF(bVR bH cLBL bSTOP "  CSI stats  " bSTG bH10
        bH10 bH2 bH2 bSTOP cLBL " queueing info " bSTG bH20 bH5 bVL "\n");
 
-  // sprintf(tmp, "%d,%d -> %d,%d   ", trace_bits[MAP_SIZE], trace_bits[MAP_SIZE + 1], 
-  //                               trace_bits[MAP_SIZE + MARK_SIZE], trace_bits[MAP_SIZE + MARK_SIZE + 1]);
- sprintf(tmp, "%x", queue_cur->path_cksum);
-  SAYF(bV bSTOP " path marks : %s%-24s" bSTG, cRST, tmp);
+  
+ sprintf(tmp, "%x", queue_cur->exec_cksum);
+  SAYF(bV bSTOP " path cksum : %s%-24s" bSTG, cRST, tmp);
 
   SAYF(bSTOP "  trace tmouts (discarded) : " cRST "%-10s " bSTG bV "\n", DI(trace_tmouts));
 
@@ -4849,8 +4822,6 @@ static u32 calculate_score(struct queue_entry* q) {
 
   }
 
-  //give more air time to the loops
-  if (q->is_loop == 1) perf_score *= LOOP_TIME;
 
   /* Make sure that we don't go over limit. */
 
