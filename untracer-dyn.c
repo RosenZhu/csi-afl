@@ -84,7 +84,7 @@
 #  define R(x) (random() % (x))
 #endif /* ^AFL_LLVM_PASS */
 
-/* ---------------CSI-AFL vars*/
+/* ---------------MY-UnTracer vars*/
 
 EXP_ST u8 *csi_basedir,           /* output of binary analysis */
           *trimmer_path; /* path to trimmer binary */
@@ -2680,7 +2680,7 @@ static void perform_dry_run() {
 // the path marks from the initial seeds
 void init_path_marks(){
     struct queue_entry* q = queue;
-    start_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD, FORKSRV_FD, oracle_argv);
+    // start_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD, FORKSRV_FD, oracle_argv);
 
     while (q) {
 
@@ -2717,10 +2717,10 @@ void init_path_marks(){
     
         total_traced++;
         total_queued++;
-        // update coverage information in oracle: just restart the forkserver
-        stop_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD);
-        sleep(1);
-        start_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD, FORKSRV_FD, oracle_argv);
+        // // update coverage information in oracle: just restart the forkserver
+        // stop_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD);
+        // sleep(1);
+        // start_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD, FORKSRV_FD, oracle_argv);
       }
       
       ck_free(use_mem);
@@ -2731,7 +2731,7 @@ void init_path_marks(){
 
     }
 
-    stop_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD);
+    // stop_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD);
 }
 
 /* Helper function: link() if possible, copy otherwise. */
@@ -3120,9 +3120,9 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
     total_traced++;
 
     // restart oracle to update coverage information;
-    stop_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD);
-    sleep(1);
-    start_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD, FORKSRV_FD, oracle_argv);
+    // stop_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD);
+    // sleep(1);
+    // start_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD, FORKSRV_FD, oracle_argv);
 
 
     // Let AFL do its thing with calibration
@@ -3145,10 +3145,10 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
 
     case FAULT_TMOUT:
       // timeout found by oracle, so run tracer
-      start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); 
-      write_to_testcase(mem, len);
-      new_fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, exec_tmout);
-      stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD);
+      // start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); 
+      // write_to_testcase(mem, len);
+      // new_fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, exec_tmout);
+      // stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD);
 keep_as_tmout:
       /* Timeouts are not very interesting, but we're still obliged to keep
          a handful of samples. We use the presence of new bits in the
@@ -3213,11 +3213,11 @@ keep_as_tmout:
       break;
 
     case FAULT_CRASH:
-      // crash found by oracle, so run tracer
-      start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); 
-      write_to_testcase(mem, len);
-      new_fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, exec_tmout);
-      stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD);
+      // // crash found by oracle, so run tracer
+      // start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); 
+      // write_to_testcase(mem, len);
+      // new_fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, exec_tmout);
+      // stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD);
 
 keep_as_crash:
 
@@ -4031,7 +4031,7 @@ static void show_stats(void) {
   banner_pad = (70 - banner_len) / 2;
   memset(tmp, ' ', banner_pad);
 
-  sprintf(tmp + banner_pad, "%s " cLCY "| based on AFL-" VERSION " |" cLGN " (%s)",  cLBL "CSI-AFL", use_banner);
+  sprintf(tmp + banner_pad, "%s " cLCY "| based on AFL-" VERSION " |" cLGN " (%s)",  cLBL "MY-UnTracer", use_banner);
 
   SAYF("\n%s\n\n", tmp);
 
@@ -7602,7 +7602,7 @@ int main(int argc, char** argv) {
   struct timeval tv;
   struct timezone tz;
 
-  SAYF(cCYA "CSI-AFL " cRST "| NSClab @ Swinburne Tech | based on AFL by <lcamtuf@google.com>\n");
+  SAYF(cCYA "MY-UnTracer " cRST "| NSClab @ Swinburne Tech | based on AFL by <lcamtuf@google.com>\n");
 
   doc_path = access(DOC_PATH, F_OK) ? "docs" : DOC_PATH;
 
@@ -7761,13 +7761,13 @@ int main(int argc, char** argv) {
 
   // ACTF("Starting trimmer forkserver...");
   // start_forkserver(&trimmer_fsrv_PID, &trimmer_fsrv_ctlFD, &trimmer_fsrv_stFD, FORKSRV_FD, trimmer_argv);
+
+  ACTF("Starting oracle forkserver...");
+  start_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD, FORKSRV_FD, oracle_argv); 
   
   //setup path marks before dry_run() executing initial seeds
   ACTF("Setting up initial path marks...");
   init_path_marks();
-
-  ACTF("Starting oracle forkserver...");
-  start_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD, FORKSRV_FD, oracle_argv); 
 
   perform_dry_run();
 

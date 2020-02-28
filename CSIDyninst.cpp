@@ -247,7 +247,10 @@ bool count_bbs(BPatch_binaryEdit * appBin, BPatch_image *appImage,
         if(BBid_file.is_open()){
             random_id = rand() % USHRT_MAX;  // USHRT_MAX = (1<<16)
             BBid_file << bb_addr << " " << random_id << " " << block_id << endl;   
-            block_id ++;  
+            block_id ++; 
+            if (block_id >= BYTES_FLAGS){
+                block_id = BYTES_FLAGS - 1;
+            } 
         }
         else{
             cout << "cannot open the file: " << addr_id_file.c_str() << endl;

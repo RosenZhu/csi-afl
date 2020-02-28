@@ -1,6 +1,3 @@
-/* 
-    Tracer has to re-run each time because it needs to update makrs and indirect ids for the later instrumentations
-*/
 
 
 #include <cstdlib>
