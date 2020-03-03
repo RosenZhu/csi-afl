@@ -27,6 +27,9 @@
 // give loops more air time
 #define LOOP_TIME   8
 
+// flags to record examined edges
+#define BYTES_FLAGS     (1 << 19)
+
 
 #define COND_COVERAGE 66 //exit(COND_COVERAGE), conditional jump
 #define INDIRECT_COVERAGE 67  //indirect jump/call

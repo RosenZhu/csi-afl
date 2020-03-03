@@ -1084,7 +1084,7 @@ EXP_ST void write_bitmap(void) {
 
   if (fd < 0) PFATAL("Unable to open '%s'", fname);
 
-  ck_write(fd, flag_bits, MAP_SIZE, fname);
+  ck_write(fd, flag_bits,  BYTES_FLAGS, fname);
 
   close(fd);
   ck_free(fname);
@@ -1582,7 +1582,7 @@ EXP_ST void setup_shm(void) {
     MAP_SIZE ~ 2*MAP_SIZE - 1 : flag about whether an edge has been examined through all fuzzing time
     2*MAP_SIZE ~ 2*MAP_SIZE + 3: cksum of path id calculated from marks
    */
-  shm_id = shmget(IPC_PRIVATE, 2 * MAP_SIZE + BYTES_CKSUM_PATH + FLAG_LOOP + BYTE_EXIT, IPC_CREAT | IPC_EXCL | 0600);
+  shm_id = shmget(IPC_PRIVATE, MAP_SIZE + BYTES_FLAGS + BYTES_CKSUM_PATH + FLAG_LOOP + BYTE_EXIT, IPC_CREAT | IPC_EXCL | 0600);
 
   if (shm_id < 0) PFATAL("shmget() failed");
 
@@ -1605,15 +1605,15 @@ EXP_ST void setup_shm(void) {
 
   /* setup flag_bits for mimicing re-instrument;  rosen*/
   flag_bits = trace_bits + MAP_SIZE;
-  memset(flag_bits, 255, MAP_SIZE);
+  memset(flag_bits, 255, BYTES_FLAGS);
 
   /* for calculating path cksum */
-  pcksum_path = trace_bits + 2 * MAP_SIZE;
+  pcksum_path = trace_bits + MAP_SIZE  + BYTES_FLAGS;
   /* loop flag */
-  pflag_loop = trace_bits + 2 * MAP_SIZE + BYTES_CKSUM_PATH;
+  pflag_loop = trace_bits + MAP_SIZE + BYTES_FLAGS + BYTES_CKSUM_PATH;
   
   /*exit code*/
-  pexit_code = trace_bits + 2 * MAP_SIZE + BYTES_CKSUM_PATH + FLAG_LOOP;
+  pexit_code = trace_bits + MAP_SIZE + BYTES_FLAGS + BYTES_CKSUM_PATH + FLAG_LOOP;
   *pexit_code = 255;
 
 }
@@ -2230,7 +2230,7 @@ static u8 run_target(s32 * child_PID, s32 * fsrv_ctlFD, s32 * fsrv_stFD, u32 tim
   memset(trace_bits, 0, MAP_SIZE);
   memset(pcksum_path, 0, BYTES_CKSUM_PATH); //rosen
   // for loop flag
-  trace_bits[2 * MAP_SIZE + BYTES_CKSUM_PATH] = 0;  // not a loop
+  trace_bits[MAP_SIZE + BYTES_FLAGS + BYTES_CKSUM_PATH] = 0;  // not a loop
   MEM_BARRIER();
 
   /* Forkserver is up, so tell it to have at it (control pipe), then read back PID. 
@@ -3208,11 +3208,11 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
   switch (fault) {
 
     case FAULT_TMOUT:
-      // timeout found by oracle, so run tracer
-      start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); 
-      write_to_testcase(mem, len);
-      new_fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, exec_tmout);
-      stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD);
+      // // timeout found by oracle, so run tracer
+      // start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); 
+      // write_to_testcase(mem, len);
+      // new_fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, exec_tmout);
+      // stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD);
 keep_as_tmout:
       /* Timeouts are not very interesting, but we're still obliged to keep
          a handful of samples. We use the presence of new bits in the
@@ -3277,11 +3277,11 @@ keep_as_tmout:
       break;
 
     case FAULT_CRASH:
-      // crash found by oracle, so run tracer
-      start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); 
-      write_to_testcase(mem, len);
-      new_fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, exec_tmout);
-      stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD);
+      // // crash found by oracle, so run tracer
+      // start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); 
+      // write_to_testcase(mem, len);
+      // new_fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, exec_tmout);
+      // stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD);
 
 keep_as_crash:
 
@@ -4312,7 +4312,7 @@ static void show_stats(void) {
   // sprintf(tmp, "%d,%d -> %d,%d   ", trace_bits[MAP_SIZE], trace_bits[MAP_SIZE + 1], 
   //                               trace_bits[MAP_SIZE + MARK_SIZE], trace_bits[MAP_SIZE + MARK_SIZE + 1]);
  sprintf(tmp, "%x", queue_cur->path_cksum);
-  SAYF(bV bSTOP " path marks : %s%-24s" bSTG, cRST, tmp);
+  SAYF(bV bSTOP " path idens : %s%-24s" bSTG, cRST, tmp);
 
   SAYF(bSTOP "  trace tmouts (discarded) : " cRST "%-10s " bSTG bV "\n", DI(trace_tmouts));
 
