@@ -55,7 +55,7 @@ bool isPrep = false, // preprocessing
     isTrimmer = false, // trimmer
     isTracer = false; // instrument tracer
 
-u32 block_id = 0;
+u32 flag_id = 0;
 
 std::map<unsigned long, u16> ramdom_map;
 std::map<unsigned long, u32> flag_map;
@@ -246,10 +246,10 @@ bool count_bbs(BPatch_binaryEdit * appBin, BPatch_image *appImage,
         bb_addr = block->getStartAddress();
         if(BBid_file.is_open()){
             random_id = rand() % USHRT_MAX;  // USHRT_MAX = (1<<16)
-            BBid_file << bb_addr << " " << random_id << " " << block_id << endl;   
-            block_id ++; 
-            if (block_id >= BYTES_FLAGS){
-                block_id = BYTES_FLAGS - 1;
+            BBid_file << bb_addr << " " << random_id << " " << flag_id << endl;   
+            flag_id ++; 
+            if (flag_id >= BYTES_FLAGS){
+                flag_id = BYTES_FLAGS - 1;
             } 
         }
         else{
@@ -299,7 +299,7 @@ bool readAddrs(fs::path output_dir){
 
 }
 
-// instrument at pre-determined edges
+// instrument at  
 bool instOracleBB(BPatch_binaryEdit * appBin, BPatch_function * instFunc, BPatch_point * instrumentPoint, 
                         u16 random_id, u32 flag_id){
     vector<BPatch_snippet *> cond_args;
@@ -322,7 +322,7 @@ bool instOracleBB(BPatch_binaryEdit * appBin, BPatch_function * instFunc, BPatch
 }
 
 
-// instrument at pre-determined edges
+// instrument at  
 bool instTracerBB(BPatch_binaryEdit * appBin, BPatch_function * instFunc, BPatch_point * instrumentPoint, 
                         u16 random_id, u32 flag_id){
    
@@ -345,7 +345,7 @@ bool instTracerBB(BPatch_binaryEdit * appBin, BPatch_function * instFunc, BPatch
 }
 
 
-// instrument at pre-determined edges
+// instrument at  
 bool instTrimmerBB(BPatch_binaryEdit * appBin, BPatch_function * instFunc, BPatch_point * instrumentPoint, 
                         u16 random_id){
     vector<BPatch_snippet *> cond_args;
