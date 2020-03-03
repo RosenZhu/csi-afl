@@ -50,12 +50,3 @@ tar -xzvf tcpdump.tar.gz
 ```
 ./output/tcpinst -nr ./queue/input_name
 ```
-
-
-## Run fuzzing
-
-Fuzzing the target binary.
-
-```
-./csi-afl -i /path/to/seeds -o /path/to/output -t 500 -- /path/to/target/binary [params]
-```
