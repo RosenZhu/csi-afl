@@ -34,19 +34,13 @@ make clean && make all
 ## instrument binary
 in the folder of csi-afl:
 ```
-tar -xzvf crash_inputs.tar.gz
-tar -xzvf normal_inputs.tar.gz
-tar -xzvf tcpdump.tar.gz
-./CSIDyninst -i ./tcpdump -o ./output/tcpinst -b ./output -P
-./CSIDyninst -i ./tcpdump -o ./output/tcpinst -b ./output -F
+tar -xzvf libksba.tar.gz
+./CSIDyninst -i ./libksba/cert-basic -o ./output/certinst -b ./output/ -P
+./CSIDyninst -i ./libksba/cert-basic -o ./output/certinst -b ./output/ -F
 ```
 
-## run crash inputs
+## run with inputs
 ```
-./output/tcpinst -nr ./crashes/input_name
+./output/certinst ./libksba/seed_dir/bull.crt 
 ```
 
-## run normal inputs
-```
-./output/tcpinst -nr ./queue/input_name
-```
