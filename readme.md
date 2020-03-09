@@ -102,13 +102,13 @@ Fuzzing the target binary.
 ./runCSIFast.sh $out $seeds $target_bin $fuzz_time $dict $timeout $param
 ```
 
-$out: output folder
-$seeds: seed folder
-$target_bin: the target binary
-$fuzz_time: fuzzing time
-$dict: "nodict" or path to dictionary
-$timeout: time out
-$param: parameters for target binary
+    $out: output folder
+    $seeds: seed folder
+    $target_bin: the target binary
+    $fuzz_time: fuzzing time
+    $dict: "nodict" or path to dictionary
+    $timeout: time out
+    $param: parameters for target binary
 
 ```
 ./instCSIFast.sh ../../outputs/csinm ../../target-bins/nm/seed_dir/ ../../target-bins/nm/nm 10 "nodict" 500 -n @@
