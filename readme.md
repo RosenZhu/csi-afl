@@ -34,13 +34,23 @@ make clean && make all
 ## instrument binary
 in the folder of csi-afl:
 ```
-tar -xzvf libksba.tar.gz
-./CSIDyninst -i ./libksba/cert-basic -o ./output/certinst -b ./output/ -P
-./CSIDyninst -i ./libksba/cert-basic -o ./output/certinst -b ./output/ -F
+tar -xzvf cflow.tar.gz
+./CSIDyninst -i ./cflow/cflow -o ./output/cflowinst -b ./output/ -P
+./CSIDyninst -i ./cflow/cflow -o ./output/cflowinst -b ./output/ -F
 ```
 
 ## run with inputs
 ```
-./output/certinst ./libksba/seed_dir/bull.crt 
+./output/cflowinst -T ./cflow/seed_dir/test.c 
 ```
 
+## segfault
+### bison
+    ./bison -vdty -b ./output/ input_file 
+    indirect addr: 0x44a42a
+    44a42a:   ff d0   callq  *%rax
+
+### cflow
+    ./cflow -T input_file
+    indirect addr: 0x4135d9
+    4135d9:   ff d0   callq  *%rax

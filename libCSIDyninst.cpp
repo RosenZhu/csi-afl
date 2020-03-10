@@ -180,7 +180,7 @@ void initAflForkServer(u32 max_predtm, const char* marks_file, const char* indir
     marks_file: a file record the marks from edges
 */
 void OraclePredtm(u32 predtm_id, const char* marks_file){
-    cout << "oracle pre-determined." << endl;
+    cout << "oracle pre-determined id:  " << dec << predtm_id << endl;
     // if (trace_bits){
     //     if (trace_bits[predtm_id + MAP_SIZE] == 255){ // have not been examined;
     //         trace_bits[predtm_id + MAP_SIZE] = 0; //examined
@@ -217,7 +217,7 @@ void OraclePredtm(u32 predtm_id, const char* marks_file){
     trace edges hit-counts; set examined edges to 0;
  */
 void TracerPredtm(u32 predtm_id){
-    cout << "tracer pre-determined." << endl;
+    cout << "tracer pre-determined id: " << predtm_id << endl;
     // if (trace_bits){
     //     trace_bits[predtm_id]++; // like AFL
 
@@ -244,7 +244,7 @@ void TracerPredtm(u32 predtm_id){
     trace edges hit-counts;
  */
 void TrimmerPredtm(u32 predtm_id){
-    cout << "trimmer pre" << endl;
+    cout << "trimmer pre id: " << predtm_id << endl;
     // if (trace_bits){
     //     trace_bits[predtm_id]++; 
     // }
@@ -257,7 +257,7 @@ indirect_file: path to the file that contains (src_addr  des_addr  id)
 
   */
 void OracleIndirect(u64 src_addr, u64 des_addr, u32 max_map_size, u32 max_predtm, const char* indirect_file, const char* marks_file){
-    cout << "oracle indirect" << endl;
+    cout << "oracle indirect src addr: "  << hex << src_addr << endl;
 
     // if (!indirect_ids.empty()){
     //     if (indirect_ids.count(EDGE(src_addr, des_addr))){ // already exist
@@ -324,7 +324,7 @@ indirect_file: path to the file that contains (src_addr  des_addr  id)
 
   */
 void TracerIndirect(u64 src_addr, u64 des_addr, u32 max_map_size, u32 max_predtm, const char* indirect_file){
-    cout << "tracer indirect" << endl;
+    cout << "tracer indirect src addr: "  << hex << src_addr << endl;
     // // should run forkserver each time; for getting the latest indirect_ids
     // if (!indirect_ids.empty()){ 
     //     auto itdl = indirect_ids.find(EDGE(src_addr, des_addr));
@@ -386,7 +386,7 @@ indirect_file: path to the file that contains (src_addr  des_addr  id)
 
   */
 void TrimmerIndirect(u64 src_addr, u64 des_addr){
-    cout << "trimmer indirect"<< endl;
+    cout << "trimmer indirect src addr: "  << hex << src_addr << endl;
     // if (!indirect_ids.empty()){ 
     //     auto itdl = indirect_ids.find(EDGE(src_addr, des_addr));
     //     if (itdl != indirect_ids.end()){ // already exist
