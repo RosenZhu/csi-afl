@@ -54,3 +54,14 @@ tar -xzvf cflow.tar.gz
     ./cflow -T input_file
     indirect addr: 0x4135d9
     4135d9:   ff d0   callq  *%rax
+
+### exiv2
+    ./exiv2 -pt input_file
+    ?condition-taken edge: 4402b7, 4403e0
+    4402b7:   89 d8    mov    %ebx,%eax
+
+### objdump
+    ./objdump -d input_file
+    ? condition-not-taken edge: 407397, 4073a7
+    407397:    48 8b 05 1a 4a 49 00    mov    0x494a1a(%rip),%rax    # 89bdb8 <synthcount>
+
