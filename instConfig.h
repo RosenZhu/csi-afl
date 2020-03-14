@@ -9,16 +9,18 @@
 #define INDIRECT_ADDR_ID "indirect_addr_ids.txt"
 
 //mark file for pre-determined edges
-#define PATH_MARKS "path_marks.txt"
+#define PATH_MARKS      "path_marks.txt"
 // mark file for indirect edges
 //#define INDIRECT_MARKS "indirect_marks.txt"
 
-#define BASE_INDIRECT           3
-//bytes for checksum for path id
-#define SIZE_CKSUM_PATH         (1 << 7)
-#define BYTES_CKSUM_PATH        (4 * SIZE_CKSUM_PATH)
+//#define SKIP_BLOCKS     "skip_blocks.txt"
 
-//bytes for recording the flags of loops
+#define BASE_INDIRECT   3
+// //bytes for checksum for path id
+// #define SIZE_CKSUM_PATH         (1 << 7)
+// #define BYTES_CKSUM_PATH        (4 * SIZE_CKSUM_PATH)
+
+//byte for recording the flags of loops
 #define FLAG_LOOP   1
 
 // byte for record exit code COND_COVERAGE or INDIRECT_COVERAGE
@@ -28,8 +30,10 @@
 #define LOOP_TIME   8
 
 // flags to record examined edges
-#define BYTES_FLAGS     (1 << 19)
+#define BYTES_FLAGS     (1 << 18)
 
 
 #define COND_COVERAGE 66 //exit(COND_COVERAGE), conditional jump
 #define INDIRECT_COVERAGE 67  //indirect jump/call
+
+

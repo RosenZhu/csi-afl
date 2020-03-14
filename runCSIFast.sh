@@ -39,6 +39,7 @@ ps -ef | grep "$COMMD" | grep -v 'grep' | awk '{print $2}' | xargs kill -2
 rm ${OUTDIR}/CSI/${NAME}.oracle
 rm ${OUTDIR}/CSI/${NAME}.trimmer
 rm ${OUTDIR}/CSI/${NAME}.tracer
+rm ${OUTDIR}/CSI/${NAME}.crasher
 # chmod 777 -R $OUTDIR
 sleep 1
 
