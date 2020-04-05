@@ -1,4 +1,6 @@
 # Overview
+Use a table to indicate whether an edge has been examined or not.
+
 CSI-Fuzz aims to fuzz binaries efficiently, which uses the idea of full-speed fuzzing. 
 
 The current version is for non-PIE binaries.
