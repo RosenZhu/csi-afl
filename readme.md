@@ -1,5 +1,5 @@
 # Edge full-speed fuzzing
-
+Re-instrument the binary from scratch.
 
 ## Install Dyninst
 
