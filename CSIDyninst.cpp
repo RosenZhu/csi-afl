@@ -900,6 +900,7 @@ int main (int argc, char **argv){
 
     /* start instrumentation*/
     BPatch bpatch;
+    BPatch::bpatch->setMappingFilePath("output.txt");
     // skip all libraries unless -l is set
     BPatch_binaryEdit *appBin = bpatch.openBinary (originalBinary, false);
     if (appBin == NULL) {

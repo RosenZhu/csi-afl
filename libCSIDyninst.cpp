@@ -257,7 +257,8 @@ indirect_file: path to the file that contains (src_addr  des_addr  id)
 
   */
 void OracleIndirect(u64 src_addr, u64 des_addr, u32 max_map_size, u32 max_predtm, const char* indirect_file, const char* marks_file){
-    cout << "oracle indirect src addr: "  << hex << src_addr << endl;
+    cout << "oracle indirect" << std::hex << " " << src_addr << " -> " << des_addr << endl;
+
 
     // if (!indirect_ids.empty()){
     //     if (indirect_ids.count(EDGE(src_addr, des_addr))){ // already exist

@@ -21,7 +21,7 @@
 
 # var- edit DYN_ROOT accordingly
 
-DYN_ROOT 	= /home/xgzhu/apps/dyninstShadow/thirdparty/dyninst-10.1.0/install
+DYN_ROOT 	= /home/xm13/workspaces/Fuzzing/ShadowGuard/thirdparty/dyninst-10.1.0/install
 # These should point to where libelf and libdwarf are installed
 # LOCAL_INC = /usr/local/include
 # LOCAL_LIBS = /usr/local/lib
@@ -34,7 +34,7 @@ CXX 		= g++
 CXXFLAGS 	= -g -Wall -O3 -std=c++11
 LIBFLAGS 	= -fpic -shared
 LDFLAGS 	= -I$(DYNINST_INCLUDE)  -L$(DYNINST_LIB) \
-					-lcommon -liberty -ldyninstAPI -lboost_system -linstructionAPI -lstdc++fs \
+					-lcommon -ldyninstAPI -lboost_system -linstructionAPI -lstdc++fs \
 					-lparseAPI -lsymtabAPI
 # -I$(TBB_INC) -I$(LOCAL_INC) -L$(LOCAL_LIBS) -I/usr/include
 
@@ -128,6 +128,9 @@ endif
 	install -m 644 docs/README docs/ChangeLog docs/*.txt $${DESTDIR}$(DOC_PATH)
 	cp -r testcases/ $${DESTDIR}$(MISC_PATH)
 	cp -r dictionaries/ $${DESTDIR}$(MISC_PATH)
+
+overwrite:
+	gcc -g -O2 -o overwrite overwrite.c -lelf
 
 publish: clean
 	test "`basename $$PWD`" = "afl" || exit 1
