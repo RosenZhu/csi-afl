@@ -23,8 +23,8 @@
 
 DYN_ROOT 	= /home/xgzhu/apps/dyninstShadow/thirdparty/dyninst-10.1.0/install
 # These should point to where libelf and libdwarf are installed
-LOCAL_INC = /usr/local/include
-LOCAL_LIBS = /usr/local/lib
+# LOCAL_INC = /usr/local/include
+# LOCAL_LIBS = /usr/local/lib
 # TBB_INC = $(DYN_ROOT)/tbb/include
 DYNINST_INCLUDE = $(DYN_ROOT)/include
 DYNINST_LIB =  $(DYN_ROOT)/lib
@@ -33,9 +33,9 @@ CC 			= gcc
 CXX 		= g++
 CXXFLAGS 	= -g -Wall -O3 -std=c++11
 LIBFLAGS 	= -fpic -shared
-LDFLAGS 	= -I/usr/include -I$(DYNINST_INCLUDE) -I$(LOCAL_INC) -L$(DYNINST_LIB) -L$(LOCAL_LIBS)\
+LDFLAGS 	= -I$(DYNINST_INCLUDE) -L$(DYNINST_LIB) \
 					-lcommon -liberty -ldyninstAPI -lboost_system -linstructionAPI -lstdc++fs \
-					-lparseAPI -lsymtabAPI
+					-lparseAPI -lsymtabAPI -lelf
 # -I$(TBB_INC)
 
 

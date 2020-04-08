@@ -85,6 +85,11 @@ export DYNINSTAPI_RT_LIB=$DYNINST_INSTALL/lib/libdyninstAPI_RT.so
 export LD_LIBRARY_PATH=$DYNINST_INSTALL/lib:$CSIFUZZ_PATH
 export PATH=$PATH:$CSIFUZZ_PATH
 ```
+
+## Install libelf
+    sudo apt install libelf-dev
+
+
 ## Install CSIFuzz
 Enter the folder csi-afl.
 Change DYN_ROOT in makefile accordingly. Then
