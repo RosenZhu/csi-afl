@@ -37,8 +37,6 @@ static u8* trace_bits;
 static s32 shm_id;                    /* ID of the SHM region             */
 static unsigned short prev_id;
 
-
-
 /* 
     fork
 */
@@ -127,15 +125,16 @@ void initAflForkServer(){
 */
 void OracleBB(u16 random_id, u32 flag_id){
     if (trace_bits){
-        if (trace_bits[flag_id + MAP_SIZE] == 255){ // have not been examined;
-            trace_bits[flag_id + MAP_SIZE] = 0; //examined
+        if ( (trace_bits[flag_id + MAP_SIZE] & ALL_BLOCKS) == 2){ // have not been examined;
+            trace_bits[flag_id + MAP_SIZE] &= 253; //examined, 1111 1101
             exit(BLOCK_EXIT);
         }
-        trace_bits[prev_id ^ random_id] ++;
-        prev_id = random_id >> 1;
+
+        // trace_bits[flag_id + MAP_SIZE] &= 253; //examined, 1111 1101
+        // exit(BLOCK_EXIT);
+        
         
     }
-
 }
 
 /* Tracer
@@ -146,8 +145,8 @@ void TracerBB(u16 random_id, u32 flag_id){
     if (trace_bits){
         trace_bits[prev_id ^ random_id] ++;
         prev_id = random_id >> 1; // like AFL
-
-        trace_bits[flag_id + MAP_SIZE] = 0; //edge flag: set to 0: examined
+        //all block examined 1111 1101, current block examined 1111 1110
+        trace_bits[flag_id + MAP_SIZE] &= 252; // 1111 1100
 
     }
 }
@@ -163,7 +162,15 @@ void TrimmerBB(u16 random_id){
 }
 
 
-
+void CrasherBB(u16 random_id, u32 flag_id){
+    if (trace_bits){
+        if ( (trace_bits[flag_id + MAP_SIZE] & CRASHER_BLOCKS) == 4){ // have not been examined;
+            trace_bits[flag_id + MAP_SIZE] &= 251; //examined, 1111 1011
+            exit(BLOCK_EXIT);
+        }
+      
+    }
+}
 
 
 

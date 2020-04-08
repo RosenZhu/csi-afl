@@ -1,0 +1,13 @@
+1. [done]in the flag_map (bitmap[id + MAP_SIZE]), one byte for all blocks, one byte for the current blocks
+    current blocks: bitmap[id + MAP_SIZE] &= 254; //1111 1110
+    all blocks: bitmap[id + MAP_SIZE] &= 253; //1111 1101
+    crasher blocks: bitmap[id + MAP_SIZE] &= 251; //1111 1011
+
+2. [done]for crasher: after tracer runs, update the information of crasher blocks
+    if ((bitmap[id + MAP_SIZE] & 1) == 0)  // current covered blocks
+                bitmap[id + MAP_SIZE] &= 251;  // all covered crash blocks
+
+3. [done]read and write [flag_id, inst_begin, inst_end, block_addr]
+
+4. [done]add crasher in untracer_dyn.c
+    update crasher.all

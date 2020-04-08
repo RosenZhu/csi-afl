@@ -30,5 +30,7 @@ mkdir ${OUTDIR}/CSI
 ./CSIDyninst -i ${TARGET} -o ${OUTDIR}/CSI/${NAME}.tracer -b ${OUTDIR}/CSI -T
 # instrument trimmer
 ./CSIDyninst -i ${TARGET} -o ${OUTDIR}/CSI/${NAME}.trimmer -b ${OUTDIR}/CSI -M
+# instrument crasher
+./CSIDyninst -i ${TARGET} -o ${OUTDIR}/CSI/${NAME}.crasher -b ${OUTDIR}/CSI -C
 
 sleep 1

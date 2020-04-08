@@ -53,23 +53,28 @@ char* csifuzz_dir = NULL;  //Output dir of csifuzz results
 bool isPrep = false, // preprocessing
     isOracle = false, // instrument oracle
     isTrimmer = false, // trimmer
+    isCrasher = false,
     isTracer = false; // instrument tracer
 
 u32 flag_id = 0;
 
 std::map<unsigned long, u16> ramdom_map;
 std::map<unsigned long, u32> flag_map;
+// [bb_id, bb_addr, inst_begin, inst_end]
+std::map <u32, std::vector<u64> > addr_inst_map;
+
 
 // call back functions
 BPatch_function *OracleBB;
 BPatch_function *initAflForkServer;
 BPatch_function *TracerBB;
 BPatch_function *TrimmerBB;
+BPatch_function *CrasherBB;
 
 const char *instLibrary = "./libCSIDyninst.so";
 
-static const char *OPT_STR = "i:o:vb:PFTM";
-static const char *USAGE = " -i <binary> -o <binary> -b <csifuzz-dir> -F(PTM)\n \
+static const char *OPT_STR = "i:o:vb:PFTMC";
+static const char *USAGE = " -i <binary> -o <binary> -b <csifuzz-dir> -F(PTMC)\n \
             -i: Input binary \n \
             -o: Output binary\n \
             -b: Output dir of csifuzz results\n \
@@ -77,7 +82,8 @@ static const char *USAGE = " -i <binary> -o <binary> -b <csifuzz-dir> -F(PTM)\n 
             -P: The initial preprocessing (counting edges and blocks; writing address files.)\n \
             -F: The full-speed oracle\n \
             -T: The tracer\n \
-            -M: The trimmer\n";
+            -M: The trimmer\n \
+            -C: The crasher\n";
 
 bool parseOptions(int argc, char **argv)
 {
@@ -109,6 +115,9 @@ bool parseOptions(int argc, char **argv)
         case 'M':
             isTrimmer = true;
             break;
+        case 'C':
+            isCrasher = true;
+            break;
         default:
             cerr << "Usage: " << argv[0] << USAGE;
             return false;
@@ -133,8 +142,9 @@ bool parseOptions(int argc, char **argv)
         return false;
     }
 
-    if ((isPrep == false) && (isOracle == false) && (isTracer == false) && (isTrimmer == false)){
-        cerr << "Specify -P, -T, -F, or -M" << endl;
+    if ((isPrep == false) && (isOracle == false) && (isTracer == false)
+             && (isTrimmer == false) &&(isCrasher == false)){
+        cerr << "Specify -P, -T, -F, C, or -M" << endl;
         cerr << "Usage: " << argv[0] << USAGE;
         return false;
     }
@@ -277,13 +287,18 @@ bool readAddrs(fs::path output_dir){
     unsigned long bb_addr;
     u16 random_id;
     u32 flag_id;
-    /*     condition taken edges   */
+
     if (stat(bb_file.c_str(), &inbuff) == 0){ // file  exists
         BB_ID_IO.open (bb_file.c_str()); //read file
         if (BB_ID_IO.is_open()){
             while (BB_ID_IO >> bb_addr >> random_id >> flag_id){
                 ramdom_map.insert(make_pair(bb_addr, random_id));
                 flag_map.insert(make_pair(bb_addr, flag_id));
+
+                // for writing addr_inst files
+                if (isOracle || isCrasher){
+                    addr_inst_map[flag_id].push_back(bb_addr);
+                }
             }
             BB_ID_IO.close();
         }
@@ -297,6 +312,101 @@ bool readAddrs(fs::path output_dir){
 
     return true;
 
+}
+
+
+/*
+// to write files that saves addr, inst_addr; 
+    sort them in terms of edge_id
+//inst_addr_file: the mapping file outputed by dyninst
+            [inst_begin, inst_end, edge, src_addr, des_addr] or
+            [inst_begin, inst_end, block, bb_addr]
+output_dir: dir to be written files
+bint: 1, oracle; 2, crasher
+*/
+
+bool writeInstAddr(fs::path output_dir, fs::path inst_addr_file){
+    //addr_inst_map
+    char buff[256];
+    char *tmp, *tmp_left;
+    //bool isedge = false;
+    unsigned long bb_addr, inst_begin, inst_end;
+    std::map<unsigned long, u32>::iterator itid;
+
+    // read mapping addrs
+    
+    ifstream mapping_io (inst_addr_file.c_str());
+    if (mapping_io.is_open()){
+        while (mapping_io){
+            bb_addr =0;
+            inst_begin=0;
+            inst_end=0;
+            tmp = NULL;
+            tmp_left = NULL;
+            
+            
+            mapping_io.getline(buff, sizeof(buff));
+
+            tmp = strtok_r (buff, ",", &tmp_left);
+            if (tmp != NULL) {
+                inst_begin = strtoul(tmp, NULL, 16);
+            }
+            else continue;
+   
+            tmp = strtok_r (NULL, ",", &tmp_left);
+            if (tmp != NULL) {
+                inst_end = strtoul(tmp, NULL, 16);
+            }
+            else continue;
+        
+            tmp = strtok_r (NULL, ",", &tmp_left);
+            if (tmp == NULL) continue;
+            if (strcmp(tmp,"block") == 0){ // for blocks
+
+                if (tmp_left != NULL) {
+                    bb_addr = strtoul(tmp_left, NULL, 16);
+                }
+                else continue;
+
+                itid = flag_map.find(bb_addr);
+                if (itid != flag_map.end()){
+                    addr_inst_map[(*itid).second].push_back(inst_begin);
+                    addr_inst_map[(*itid).second].push_back(inst_end);
+                }
+            } 
+        }
+        mapping_io.close();
+    }
+    else{
+        cout << "generate mapping files first." << endl;
+        return false;
+    }
+
+    // writing to a file
+    fs::path sort_map_path;
+    if (isOracle){
+        sort_map_path = output_dir / ORACLE_BLOCK_MAP;
+    }
+    else {
+        sort_map_path = output_dir / CRASHER_BLOCK_MAP;
+    }
+     
+    ofstream write_map (sort_map_path.c_str(), ios::out | ios::app | ios::binary);
+    if (write_map.is_open()){
+        for (auto itwrite = addr_inst_map.begin(); itwrite != addr_inst_map.end(); itwrite++){
+            if ((*itwrite).second.size() != 3) continue;
+            // [id, inst_begin, inst_end, bb_addr]
+            write_map << (*itwrite).first << ","<< (*itwrite).second[1] << "," << (*itwrite).second[2]<< "," << (*itwrite).second[0] << endl;
+            
+        }
+        write_map.close();
+    }
+    else{
+        cout << "wrong writing edge mapping."<<endl;
+        return false;
+    }
+    
+    return true;
 }
 
 // instrument at  
@@ -434,6 +544,10 @@ bool bbInstrument(BPatch_binaryEdit * appBin, BPatch_image *appImage,
             if (!instTrimmerBB(appBin, TrimmerBB, bbEntry, random_id))
                 cout << "BB instrument error." << endl;
         }
+        else if (isCrasher){
+            if (!instOracleBB(appBin, CrasherBB, bbEntry, random_id, flag_id))
+                cout << "BB instrument error." << endl;
+        }
 
     }
     
@@ -479,9 +593,23 @@ int main (int argc, char **argv){
     }
 
     fs::path out_dir (reinterpret_cast<const char*>(csifuzz_dir)); // files for csifuzz results
+    fs::path oracle_map = out_dir / ORACLE_INST_ADDR;
+    fs::path crasher_map = out_dir / CRASHER_INST_ADDR;
 
     /* start instrumentation*/
     BPatch bpatch;
+
+     // mapping address
+    if (isOracle){
+        BPatch::bpatch->setMappingFilePath(oracle_map.c_str());
+    }
+    else if (isCrasher){
+        BPatch::bpatch->setMappingFilePath(crasher_map.c_str());
+    }
+    else{
+        BPatch::bpatch->setMappingFilePath("/dev/null");
+    }
+
     // skip all libraries unless -l is set
     BPatch_binaryEdit *appBin = bpatch.openBinary (originalBinary, false);
     if (appBin == NULL) {
@@ -508,8 +636,9 @@ int main (int argc, char **argv){
     OracleBB = findFuncByName (appImage, (char *) "OracleBB");
     TracerBB = findFuncByName (appImage, (char *) "TracerBB");
     TrimmerBB = findFuncByName (appImage, (char *) "TrimmerBB");
+    CrasherBB = findFuncByName (appImage, (char *) "CrasherBB");
 
-    if (!initAflForkServer || !OracleBB || !TracerBB || !TrimmerBB) {
+    if (!initAflForkServer || !OracleBB || !TracerBB || !TrimmerBB || !CrasherBB) {
         cerr << "Instrumentation library lacks callbacks!" << endl;
         return EXIT_FAILURE;
     }
@@ -550,14 +679,13 @@ int main (int argc, char **argv){
         if (!bbInstrument(appBin, appImage, funcIter, funcName, out_dir)) {
             cout << "fail to instrument function: " << funcName << endl;
             // return EXIT_FAILURE;
-            }
-
+        }
     }
 
     BPatch_function *funcToPatch = NULL;
     BPatch_Vector<BPatch_function*> funcs;
     
-    appImage->findFunction("main",funcs);
+    appImage->findFunction("main",funcs);  //"main"
     if(!funcs.size()) {
         cerr << "Couldn't locate main, check your binary. "<< endl;
         return EXIT_FAILURE;
@@ -578,6 +706,20 @@ int main (int argc, char **argv){
         cerr << "Failed to write output file: " << instrumentedBinary << endl;
         return EXIT_FAILURE;
     }
+
+    sleep(1);
+    if (isOracle || isCrasher){
+        
+        fs::path tmp_map;
+        if (isOracle) tmp_map = oracle_map;
+        else if (isCrasher) tmp_map = crasher_map;
+
+        if (!writeInstAddr(out_dir, tmp_map)) {
+            cerr << "Failed to write mapping file: " << endl;
+            return EXIT_FAILURE;
+        }
+
+    }   
 
     if(verbose){
         cout << "All done! Happy fuzzing!" << endl;
