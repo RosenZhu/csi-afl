@@ -1,9 +1,7 @@
 /* TODO
-  1. [OK]remove all about the "MARK_SIZE"
-  2. [OK]tracer should run forkserver for each time
-  3. [OK]use ORACLE to run dry_run();
-  4. [OK] record #loop in seed queue; use #loop to increase the energy assigned to a seed
-5. add attributes to plot_file
+    1. setup_instruments_ids();
+    2. setup_args(): mkdir CSI
+    3. setup_args(): "%s/../CSI" --> "%s/CSI"
 
 */
 
@@ -31,6 +29,10 @@
 
 #include "instConfig.h"
 #include "config.h"
+#include <elf.h>
+#include <libelf.h>
+#include <gelf.h>
+
 #include "types.h"
 #include "debug.h"
 #include "alloc-inl.h"
@@ -87,22 +89,36 @@
 /* ---------------CSI-AFL vars*/
 
 EXP_ST u8 *csi_basedir,           /* output of binary analysis */
-          *trimmer_path; /* path to trimmer binary */
+          *oracle_mapping_path,        /* instrument mapping for oracle */
+          *crasher_mapping_path,       /* instrument mapping for crasher */
+          *trimmer_path, /* path to trimmer binary */
+          *crasher_path;    /* path to crasher binary*/
 
 char ** trimmer_argv; //rosen
+char ** crasher_argv;
 
 EXP_ST s32 trimmer_fsrv_ctlFD,         /* Forkserver control pipes         */
            trimmer_fsrv_stFD,          /* Forkserver status pipes          */
            trimmer_fsrv_PID,           /* Forkserver PIDs                  */
-           trimmer_child_PID;          /* Forkserver child PIDs            */
+           trimmer_child_PID,          /* Forkserver child PIDs            */
+           crasher_fsrv_ctlFD,         /* Forkserver control pipes         */
+           crasher_fsrv_stFD,          /* Forkserver status pipes          */
+           crasher_fsrv_PID,           /* Forkserver PIDs                  */
+           crasher_child_PID;          /* Forkserver child PIDs            */
 
 
-EXP_ST u8 *pexit_code,          /* record the exit code; in case the target program fork() a new child */
-          *pflag_loop,          /* contain a loop? 0: not; 1: yes */
-          *flag_bits;           /* SHM with flags about whether an edge has been examined */
-                              /* 255: not examined;  0: examined */
-EXP_ST u8* pcksum_path;     /* data for path checksum as an id */
+//*pexit_code,          /* record the exit code; in case the target program fork() a new child */
+          //*pflag_loop,          /* contain a loop? 0: not; 1: yes */
+EXP_ST u8  *flag_bits;           /* SHM with flags about whether an edge has been examined */
+                              
+EXP_ST u32 total_fork_crash = 0;    /* number of crashes caused by instrumenting at fork() */
+//EXP_ST u8* pcksum_path;     /* data for path checksum as an id */
+// EXP_ST u8 restart_crasher = 0;     /*restart crasher?*/
 
+EXP_ST int oracle_inst_begin[MAP_SIZE],    /* oracle oracle_inst_begin[edge_id] = inst_begin_addr */
+              oracle_inst_end[MAP_SIZE],    /* oracle oracle_inst_end[edge_id] = inst_end_addr */
+              crasher_inst_begin[MAP_SIZE],    /* crasher crasher_inst_begin[edge_id] = inst_begin_addr */
+              crasher_inst_end[MAP_SIZE];    /* crasher crasher_inst_end[edge_id] = inst_end_addr */
 
 
 /* -------------- Untracer-AFL vars ------------------------------------- */
@@ -306,6 +322,7 @@ struct queue_entry {
   
   u32 path_cksum;             /* identifier for the path */
   u8 is_loop;                 /* assign more energy for a loop: 0:not; 1:yes */
+  
 
 };
 
@@ -451,15 +468,20 @@ static void setup_args(int argc, char ** argv){
   oracle_argv = malloc((argc-optind+1) * sizeof(target_argv));//sizeof(pointer)
   tracer_argv = malloc((argc-optind+1) * sizeof(target_argv));
   trimmer_argv = malloc((argc-optind+1) * sizeof(target_argv)); //rosen
-  //CSI dir
-  u8* tmp = alloc_printf("%s/CSI", out_dir);
-  if (mkdir(tmp, 0700)) PFATAL("Unable to create '%s'", tmp);
-  ck_free(tmp);
+  crasher_argv = malloc((argc-optind+1) * sizeof(target_argv));
+  //CSI dir -- use shell to build it. rosen
+  // u8* tmp = alloc_printf("%s/CSI", out_dir);
+  // if (mkdir(tmp, 0700)) PFATAL("Unable to create '%s'", tmp);
+  // ck_free(tmp);
 
-  csi_basedir = alloc_printf("%s/CSI", out_dir);
-  oracle_path = alloc_printf("%s/CSI/%s.oracle", out_dir, basename(target_path));
-  tracer_path = alloc_printf("%s/CSI/%s.tracer", out_dir, basename(target_path));
-  trimmer_path = alloc_printf("%s/CSI/%s.trimmer", out_dir, basename(target_path));//rosen
+  csi_basedir = alloc_printf("%s/../CSI", out_dir);
+  oracle_path = alloc_printf("%s/../CSI/%s.oracle", out_dir, basename(target_path));
+  tracer_path = alloc_printf("%s/../CSI/%s.tracer", out_dir, basename(target_path));
+  crasher_path = alloc_printf("%s/../CSI/%s.crasher", out_dir, basename(target_path));
+  trimmer_path = alloc_printf("%s/../CSI/%s.trimmer", out_dir, basename(target_path));//rosen
+  // for skipping instrumentation
+  oracle_mapping_path = alloc_printf("%s/../CSI/%s", out_dir, ORACLE_EDGES_MAP);
+  crasher_mapping_path = alloc_printf("%s/../CSI/%s", out_dir, CRASHER_EDGES_MAP);
 
   /* If present, replace "@@" with out_file. */
   /* TODO? - tcaseFD STDIN configuration. */
@@ -470,40 +492,25 @@ static void setup_args(int argc, char ** argv){
     memcpy(&oracle_argv[i], &target_argv[i], sizeof(target_argv[0]));
     memcpy(&tracer_argv[i], &target_argv[i], sizeof(target_argv[0]));  
     memcpy(&trimmer_argv[i], &target_argv[i], sizeof(target_argv[0]));//rsoen    
+    memcpy(&crasher_argv[i], &target_argv[i], sizeof(target_argv[0]));
+    
   }
 
   /* Set argument target copy paths and NULL terminators. */
   oracle_argv[0] = oracle_path;
   tracer_argv[0] = tracer_path;
   trimmer_argv[0] = trimmer_path;//rosen
+  crasher_argv[0]= crasher_path;
 
   oracle_argv[argc-optind] = NULL;
   tracer_argv[argc-optind] = NULL;
   trimmer_argv[argc-optind] = NULL;//rosen
+  crasher_argv[argc-optind] = NULL;//rosen
 
   return;
 }
 
 
-
-
-// for checking crash 
-// void instrument_crasher(unsigned short dedup){
-
-//   /* Instrument the original binary */
-
-//   if(dedup==1){ //remove the recorded addresses that are duplicated
-//     char * dyninst_args_crasher[] = {"CSIDyninst", "-i", target_path, "-o", crash_path, "-B", crash_addr_dir, "-E", tracer_addr_dir, "-C", NULL};
-//     execute(dyninst_args_crasher, "CSIDyninst", 1);
-//   }
-//   else{
-//     char * dyninst_args_crasher[] = {"CSIDyninst", "-i", target_path, "-o", crash_path, "-B", crash_addr_dir, "-C", NULL};
-//     execute(dyninst_args_crasher, "CSIDyninst", 1);
-//   }
-  
-
-//   return;
-// }
 
 void setup_instruments_ids(){
   /* must get the edge ids first */
@@ -533,11 +540,168 @@ void setup_instruments_ids(){
   execute(dyninst_args_trimmer, "CSIDyninst", 1);
   OKF("Successfully set up Trimmer!");
 
+  /* Instrument the crasher  */
+  ACTF("Setting up crasher binary...");
+  char * dyninst_args_crasher[] = {"CSIDyninst", "-i", target_path, "-o", crasher_path, "-b", csi_basedir, "-C", NULL};
+  execute(dyninst_args_crasher, "CSIDyninst", 1);
+  OKF("Successfully set up Crasher!");
+
 
   return;
 }
 
+// void get_inst_addrs(u8* mapping_path, int inst_begin[], int inst_end[]){
+//   char *tmp, *tmp_left;
+//   char buff[256];
+//   // oracle
+//   FILE * inst_file = fopen(mapping_path, "r");
+//   while (fgets(buff, sizeof(buff), inst_file)){
+//     tmp = strtok_r (buff, ",", &tmp_left);
+//     int id = atoi(tmp);
 
+//     tmp = strtok_r (NULL, ",", &tmp_left);
+//     int inst_begin_addr = atoi(tmp);
+
+//     tmp = strtok_r (NULL, ",", &tmp_left);
+//     int inst_end_addr = atoi(tmp);
+
+//     inst_begin[id] = inst_begin_addr;
+//     inst_end[id] = inst_end_addr;
+//   }
+
+//   fclose(inst_file);
+// }
+
+/* get id--inst_addrs for jump over instrumentation */
+void setup_inst_addrs(){
+  
+  char *tmp, *tmp_left;
+  char buff[256];
+  // oracle
+  FILE * oracle_inst_file;
+  if (!(oracle_inst_file = fopen(oracle_mapping_path, "r"))) {
+      perror("cannot open oracle mapping file.");
+      exit(EXIT_FAILURE);
+  } 
+
+  while (fgets(buff, sizeof(buff), oracle_inst_file)){
+    tmp = strtok_r (buff, ",", &tmp_left);
+    int id = atoi(tmp);
+
+    tmp = strtok_r (NULL, ",", &tmp_left);
+    int inst_begin = atoi(tmp);
+
+    tmp = strtok_r (NULL, ",", &tmp_left);
+    int inst_end = atoi(tmp);
+
+    oracle_inst_begin[id] = inst_begin;
+    oracle_inst_end[id] = inst_end;
+  }
+
+  fclose(oracle_inst_file);
+
+  // // crasher
+  // FILE * crasher_inst_file;
+  // if (!(crasher_inst_file = fopen(crasher_mapping_path, "r"))) {
+  //     perror("cannot open crasher mapping file.");
+  //     exit(EXIT_FAILURE);
+  // } 
+  // while (fgets(buff, sizeof(buff), crasher_inst_file)){
+  //   tmp = strtok_r (buff, ",", &tmp_left);
+  //   int id = atoi(tmp);
+
+  //   tmp = strtok_r (NULL, ",", &tmp_left);
+  //   int inst_begin = atoi(tmp);
+
+  //   tmp = strtok_r (NULL, ",", &tmp_left);
+  //   int inst_end = atoi(tmp);
+
+  //   crasher_inst_begin[id] = inst_begin;
+  //   crasher_inst_end[id] = inst_end;
+  // }
+
+  // fclose(crasher_inst_file);
+
+}
+
+/*
+ jump over instrumentation; 
+  only jump over pre-determined edges; indirect edges are updated by re-start the forkserver
+  inst_bin_path: path to the instrumented binary, oracle or crasher
+ inst_begin: crasher_inst_begin[] or oracle_inst_begin[]
+ inst_end: crasher_inst_end[] or oracle_inst_end[]
+oracle_crash: 1, oracle; 2, crasher
+*/
+void jump_inst(u8 * inst_bin_path, int inst_begin[], int inst_end[], u8 oracle_crash){
+  char* buffer;
+  int offset, inst_begin_addr, inst_end_addr;
+  int fd = open (inst_bin_path, O_RDWR);
+  if (fd < 0 ){
+    perror("open binary file, jump_inst()");
+    exit(EXIT_FAILURE);
+  }
+
+  struct stat orstat;
+  if (fstat(fd, &orstat) < 0){
+    close(fd);
+    perror("stat file, jump_inst()");
+    exit(EXIT_FAILURE);
+  }
+  // changes to the map are carried through to the underlying file.
+  buffer = (char*)mmap (NULL, orstat.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  if (buffer == (char*)MAP_FAILED){
+    close(fd);
+    perror("mmap file, jump_inst()");
+    exit(EXIT_FAILURE);
+  }
+
+  close(fd);
+
+  elf_version(EV_CURRENT);
+  Elf *elf = elf_memory(buffer, orstat.st_size);
+
+  size_t shstrndx;
+  if (elf_getshdrstrndx(elf, &shstrndx) != 0) {
+	  perror("Cannot not get section string table.");
+    exit(EXIT_FAILURE);
+  }
+
+  Elf_Scn *scn = NULL;
+  GElf_Shdr secHead;
+  char *sectionName;
+
+  while ((scn = elf_nextscn(elf, scn)) != NULL) {
+      gelf_getshdr(scn, &secHead);
+      sectionName = elf_strptr(elf, shstrndx, secHead.sh_name); 
+      if (strcmp(sectionName, ".dyninstInst") != 0) continue;
+
+      /* jump over inst functions in dyninst section */
+      // check the covered edges; should have run tracer before
+      for (int ir=0; ir < MAP_SIZE; ir++){
+        // not covered || not record in mapping 
+        if ((trace_bits[ir] == 0) || (inst_begin[ir] == 0)) continue;
+        // oracle marked
+        if ((oracle_crash == 1) &&
+                ((trace_bits[ir + MAP_SIZE] & EDGE_MARK )== 0) ) continue;
+        inst_begin_addr = inst_begin[ir];
+        inst_end_addr = inst_end[ir];
+        offset = inst_begin_addr - secHead.sh_addr + secHead.sh_offset;
+        buffer[offset] = 0xe9;
+        *((int*)(buffer + offset + 1)) = inst_end_addr - inst_begin_addr - 5;
+      }
+    
+      break;
+  }
+  // update to file
+  if (msync(buffer, orstat.st_size, MS_SYNC) == -1){
+    perror("sync mmap to file fail.");
+    exit(EXIT_FAILURE);
+  }
+  
+  munmap(buffer, orstat.st_size);
+  
+
+}
 
 /* Get unix time in milliseconds */
 
@@ -1081,6 +1245,7 @@ EXP_ST void write_bitmap(void) {
 
 }
 
+
 /* Check if the current execution path brings anything new to the table.
    Update virgin bits to reflect the finds. Returns 1 if the only change is
    the hit-count for a particular tuple; 2 if there are new tuples seen. 
@@ -1247,76 +1412,76 @@ static u32 count_non_255_bytes(u8* mem) {
 
 }
 
-/* Destructively simplify trace by eliminating hit count information
-   and replacing it with 0x80 or 0x01 depending on whether the tuple
-   is hit or not. Called on every new crash or timeout, should be
-   reasonably fast. */
+// /* Destructively simplify trace by eliminating hit count information
+//    and replacing it with 0x80 or 0x01 depending on whether the tuple
+//    is hit or not. Called on every new crash or timeout, should be
+//    reasonably fast. */
 
-static const u8 simplify_lookup[256] = { 
+// static const u8 simplify_lookup[256] = { 
 
-  [0]         = 1,
-  [1 ... 255] = 128
+//   [0]         = 1,
+//   [1 ... 255] = 128
 
-};
+// };
 
-#ifdef __x86_64__
+// #ifdef __x86_64__
 
-static void simplify_trace(u64* mem) {
+// static void simplify_trace(u64* mem) {
 
-  u32 i = MAP_SIZE >> 3;
+//   u32 i = MAP_SIZE >> 3;
 
-  while (i--) {
+//   while (i--) {
 
-    /* Optimize for sparse bitmaps. */
+//     /* Optimize for sparse bitmaps. */
 
-    if (unlikely(*mem)) {
+//     if (unlikely(*mem)) {
 
-      u8* mem8 = (u8*)mem;
+//       u8* mem8 = (u8*)mem;
 
-      mem8[0] = simplify_lookup[mem8[0]];
-      mem8[1] = simplify_lookup[mem8[1]];
-      mem8[2] = simplify_lookup[mem8[2]];
-      mem8[3] = simplify_lookup[mem8[3]];
-      mem8[4] = simplify_lookup[mem8[4]];
-      mem8[5] = simplify_lookup[mem8[5]];
-      mem8[6] = simplify_lookup[mem8[6]];
-      mem8[7] = simplify_lookup[mem8[7]];
+//       mem8[0] = simplify_lookup[mem8[0]];
+//       mem8[1] = simplify_lookup[mem8[1]];
+//       mem8[2] = simplify_lookup[mem8[2]];
+//       mem8[3] = simplify_lookup[mem8[3]];
+//       mem8[4] = simplify_lookup[mem8[4]];
+//       mem8[5] = simplify_lookup[mem8[5]];
+//       mem8[6] = simplify_lookup[mem8[6]];
+//       mem8[7] = simplify_lookup[mem8[7]];
 
-    } else *mem = 0x0101010101010101ULL;
+//     } else *mem = 0x0101010101010101ULL;
 
-    mem++;
+//     mem++;
 
-  }
+//   }
 
-}
+// }
 
-#else
+// #else
 
-static void simplify_trace(u32* mem) {
+// static void simplify_trace(u32* mem) {
 
-  u32 i = MAP_SIZE >> 2;
+//   u32 i = MAP_SIZE >> 2;
 
-  while (i--) {
+//   while (i--) {
 
-    /* Optimize for sparse bitmaps. */
+//     /* Optimize for sparse bitmaps. */
 
-    if (unlikely(*mem)) {
+//     if (unlikely(*mem)) {
 
-      u8* mem8 = (u8*)mem;
+//       u8* mem8 = (u8*)mem;
 
-      mem8[0] = simplify_lookup[mem8[0]];
-      mem8[1] = simplify_lookup[mem8[1]];
-      mem8[2] = simplify_lookup[mem8[2]];
-      mem8[3] = simplify_lookup[mem8[3]];
+//       mem8[0] = simplify_lookup[mem8[0]];
+//       mem8[1] = simplify_lookup[mem8[1]];
+//       mem8[2] = simplify_lookup[mem8[2]];
+//       mem8[3] = simplify_lookup[mem8[3]];
 
-    } else *mem = 0x01010101;
+//     } else *mem = 0x01010101;
 
-    mem++;
-  }
+//     mem++;
+//   }
 
-}
+// }
 
-#endif /* ^__x86_64__ */
+// #endif /* ^__x86_64__ */
 
 /* Destructively classify execution counts in a trace. This is used as a
    preprocessing step for any newly acquired traces. Called on every exec,
@@ -1561,10 +1726,11 @@ EXP_ST void setup_shm(void) {
   //shm_id = shmget(IPC_PRIVATE, MAP_SIZE, IPC_CREAT | IPC_EXCL | 0600);
 
   /* 0 ~ MAP_SIZE - 1: bitmap
-    MAP_SIZE ~ 2*MAP_SIZE - 1 : flag about whether an edge has been examined through all fuzzing time
+    MAP_SIZE ~ 2*MAP_SIZE - 1 : flag about whether an edge has been examined through all fuzzing time;
+                                in case the mappings from dyninst miss some edges
     2*MAP_SIZE ~ 2*MAP_SIZE + 3: cksum of path id calculated from marks
    */
-  shm_id = shmget(IPC_PRIVATE, MAP_SIZE + BYTES_FLAGS + BYTES_CKSUM_PATH + FLAG_LOOP + BYTE_EXIT, IPC_CREAT | IPC_EXCL | 0600);
+  shm_id = shmget(IPC_PRIVATE, MAP_SIZE + BYTES_FLAGS + FLAG_LOOP + BYTE_EXIT, IPC_CREAT | IPC_EXCL | 0600);
 
   if (shm_id < 0) PFATAL("shmget() failed");
 
@@ -1589,13 +1755,8 @@ EXP_ST void setup_shm(void) {
   flag_bits = trace_bits + MAP_SIZE;
   memset(flag_bits, 255, BYTES_FLAGS);
 
-  /* for calculating path cksum */
-  pcksum_path = trace_bits + MAP_SIZE + BYTES_FLAGS;
-  /* loop flag */
-  pflag_loop = trace_bits + MAP_SIZE + BYTES_FLAGS + BYTES_CKSUM_PATH;
-  /*exit code*/
-  pexit_code = trace_bits + MAP_SIZE + BYTES_FLAGS + BYTES_CKSUM_PATH + FLAG_LOOP;
-  *pexit_code = 255;
+
+  trace_bits[MAP_SIZE + BYTES_FLAGS + FLAG_LOOP] = 255;
 
 
 }
@@ -2210,9 +2371,9 @@ static u8 run_target(s32 * child_PID, s32 * fsrv_ctlFD, s32 * fsrv_stFD, u32 tim
      territory. */
 
   memset(trace_bits, 0, MAP_SIZE);
-  memset(pcksum_path, 0, BYTES_CKSUM_PATH); //rosen
   // for loop flag
-  trace_bits[MAP_SIZE + BYTES_FLAGS + BYTES_CKSUM_PATH] = 0;  // not a loop
+  trace_bits[MAP_SIZE + BYTES_FLAGS] = 0;  // not a loop
+  trace_bits[MAP_SIZE + BYTES_FLAGS + FLAG_LOOP] = 255; //reset the exit code
   MEM_BARRIER();
 
   /* Forkserver is up, so tell it to have at it (control pipe), then read back PID. 
@@ -2297,15 +2458,6 @@ static u8 run_target(s32 * child_PID, s32 * fsrv_ctlFD, s32 * fsrv_stFD, u32 tim
       if (exit_status == INDIRECT_COVERAGE) return FAULT_INDIRECT;
   }
 
-  /* in case the target program fork a new child */
-  if ((*pexit_code) == COND_COVERAGE){
-    return FAULT_COND;
-  }
-  else if ((*pexit_code) == INDIRECT_COVERAGE){
-    return FAULT_INDIRECT;
-  }
-
-
   return FAULT_NONE;
 
 }
@@ -2381,7 +2533,6 @@ void stop_forkserver(int * fork_PID, int * fsrv_ctlFD, int * fsrv_stFD);
    to warn about flaky or otherwise problematic test cases early on; and when
    new paths are discovered to detect variable behavior and so on. */
 
-/* As calibration requires full tracing, we call the tracer binary in this run_target() context. */
 
 static u8 calibrate_case(struct queue_entry* q, u8* use_mem, u32 handicap, u8 from_queue) {
 
@@ -2416,8 +2567,8 @@ static u8 calibrate_case(struct queue_entry* q, u8* use_mem, u32 handicap, u8 fr
 
   start_us = get_cur_time_us();
 
-  // use the same tracer (no re-start) to calibrate
-  start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); //rosen
+  // use the same  (no re-start) to calibrate
+  start_forkserver(&trimmer_fsrv_PID, &trimmer_fsrv_ctlFD, &trimmer_fsrv_stFD, FORKSRV_FD, trimmer_argv); //rosen
   for (stage_cur = 0; stage_cur < stage_max; stage_cur++) {
 
     u32 cksum;
@@ -2425,8 +2576,7 @@ static u8 calibrate_case(struct queue_entry* q, u8* use_mem, u32 handicap, u8 fr
     if (!first_run && !(stage_cur % stats_update_freq)) show_stats();
 
     write_to_testcase(use_mem, q->len);
-    fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, use_tmout); //rosen
-    //fault = run_target(&oracle_child_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD, use_tmout);
+    fault = run_target(&trimmer_child_PID, &trimmer_fsrv_ctlFD, &trimmer_fsrv_stFD, use_tmout); //rosen
 
     calib_execs++;
 
@@ -2525,7 +2675,7 @@ abort_calibration:
   stage_max  = old_sm;
 
   if (!first_run) show_stats();
-  stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD); //rosen
+  stop_forkserver(&trimmer_fsrv_PID, &trimmer_fsrv_ctlFD, &trimmer_fsrv_stFD); //rosen
 
   return fault;
 
@@ -2706,14 +2856,25 @@ static void perform_dry_run() {
 
 }
 
+u32 count_edges(){
+  u32 num_edges = 0;
+  for (int i =0; i < MAP_SIZE; i++){
+    if (trace_bits[i + MAP_SIZE] != 255){
+      num_edges++;
+    }
+  }
+  return num_edges;
+}
 
 // the path marks from the initial seeds
 void init_path_marks(){
     struct queue_entry* q = queue;
     start_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD, FORKSRV_FD, oracle_argv);
+    u8 oracleExitCode;
+    u32 num_seeds = 0, num_edges = 0;
 
     while (q) {
-
+      num_seeds++;
       u8* use_mem;
       s32 fd;
       u8 fault;
@@ -2734,26 +2895,31 @@ void init_path_marks(){
 
       write_to_testcase(use_mem, q->len);
       fault = run_target(&oracle_child_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD, exec_tmout);
-      
+      oracleExitCode = trace_bits[MAP_SIZE + BYTES_FLAGS + FLAG_LOOP];
       /* path marks; every initial seed has a path mark, but they could be the same,
       * because it cannot ensure that every initial seed can reach a new coverage.*/
-
-      if (fault == FAULT_COND || fault ==FAULT_INDIRECT){
+     
+      if (fault == FAULT_COND || fault ==FAULT_INDIRECT || (oracleExitCode == COND_COVERAGE) || (oracleExitCode == INDIRECT_COVERAGE)){
+        
+        // trace_bits from oracle
+        q->path_cksum = hash32(trace_bits,MAP_SIZE, HASH_CONST);
         // traverse all examined edges along the path
         write_to_testcase(use_mem, q->len);
         start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); 
         fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, exec_tmout);
+        has_new_bits(virgin_bits);
         stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD);
         
-        q->path_cksum = hash32(pcksum_path, BYTES_CKSUM_PATH, HASH_CONST);
-        q->is_loop = *pflag_loop;
+        q->is_loop = trace_bits[MAP_SIZE + BYTES_FLAGS];
 
         total_traced++;
         total_queued++;
-        // update coverage information in oracle: just restart the forkserver
+        // update coverage information in oracle
         stop_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD);
-        sleep(1);
+        jump_inst(oracle_path, oracle_inst_begin, oracle_inst_end, 1);  //rosen
         start_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD, FORKSRV_FD, oracle_argv);
+
+        
       }
       
       ck_free(use_mem);
@@ -2762,9 +2928,19 @@ void init_path_marks(){
 
       q = q->next;
 
+      num_edges = count_edges();
+
+      fprintf(plot_file, 
+          "%u, %u\n",
+          num_seeds, num_edges
+          ); 
+
+      fflush(plot_file);
+
     }
 
     stop_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD);
+
 }
 
 /* Helper function: link() if possible, copy otherwise. */
@@ -3108,13 +3284,30 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
   u8  keeping = 0, res;
   u8  new_fault;
   u8  hnbits = 0;
+  u32 tmp_pathcksum=0;
+  u8 oracleExitCode, crashExitCode;
 
-  if (fault == FAULT_COND || fault ==FAULT_INDIRECT){
+  // oracle results
+  oracleExitCode= trace_bits[MAP_SIZE + BYTES_FLAGS + FLAG_LOOP];
+  if (fault == FAULT_COND || fault ==FAULT_INDIRECT || (oracleExitCode == COND_COVERAGE) || (oracleExitCode == INDIRECT_COVERAGE)){
+    
+    // trace_bits executed by oracle
+    tmp_pathcksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
+    // restart_crasher = 1;
+
     // found new edges, run tracer
     start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); 
     write_to_testcase(mem, len);
     new_fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, exec_tmout);
     stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD);
+
+    // modify oracle to update coverage information
+    // update crasher
+    stop_forkserver(&crasher_fsrv_PID, &crasher_fsrv_ctlFD, &crasher_fsrv_stFD);
+    stop_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD);
+    jump_inst(oracle_path, oracle_inst_begin, oracle_inst_end, 1);
+    start_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD, FORKSRV_FD, oracle_argv);
+    start_forkserver(&crasher_fsrv_PID, &crasher_fsrv_ctlFD, &crasher_fsrv_stFD, FORKSRV_FD, crasher_argv); 
 
     // Like AFL, we discard any inputs which timeout 
     if (!stop_soon && new_fault == FAULT_TMOUT) {
@@ -3122,7 +3315,7 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
       goto keep_as_tmout;
     }
 
-    // by tracer; If we hit crash on oracle, save it as a crash input
+    // by tracer; If we hit crash on tracer, save it as a crash input
     if (!stop_soon && new_fault == FAULT_CRASH) goto keep_as_crash;
 
     // update bitmap (virgin_bits)
@@ -3147,18 +3340,13 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
 
     queued_with_bits++;
 
-    //path cksum
+    
     queue_top->exec_cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST); //rosen
-    queue_top->path_cksum = hash32(pcksum_path, BYTES_CKSUM_PATH, HASH_CONST);
-    queue_top->is_loop = *pflag_loop;
+    queue_top->is_loop = trace_bits[MAP_SIZE + BYTES_FLAGS];
+    //path cksum
+    queue_top->path_cksum = tmp_pathcksum;
 
     total_traced++;
-
-    // restart oracle to update coverage information;
-    stop_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD);
-    sleep(1);
-    start_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD, FORKSRV_FD, oracle_argv);
-
 
     // Let AFL do its thing with calibration
     res = calibrate_case(queue_top, mem, queue_cycle - 1, 0);
@@ -3171,110 +3359,51 @@ static u8 save_if_interesting(void* mem, u32 len, u8 fault) {
 
     keeping = 1;
 
-    total_queued++;
+    total_queued++; 
       
   }
  
 
   switch (fault) {
-
-    case FAULT_TMOUT:
-      // // timeout found by oracle, so run tracer
-      // start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); 
-      // write_to_testcase(mem, len);
-      // new_fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, exec_tmout);
-      // stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD);
-keep_as_tmout:
-      /* Timeouts are not very interesting, but we're still obliged to keep
-         a handful of samples. We use the presence of new bits in the
-         hang-specific bitmap as a signal of uniqueness. In "dumb" mode, we
-         just keep everything. */
-
-      total_tmouts++;
-
-      if (unique_hangs >= KEEP_UNIQUE_HANG) return keeping;
-
-      if (!dumb_mode) {
-
-#ifdef __x86_64__
-        simplify_trace((u64*)trace_bits);
-#else
-        simplify_trace((u32*)trace_bits);
-#endif /* ^__x86_64__ */
-
-        if (!has_new_bits(virgin_tmout)) return keeping;
-
-      }
-
-      unique_tmouts++;
-
-      /* Before saving, we make sure that it's a genuine hang by re-running
-         the target with a more generous timeout (unless the default timeout
-         is already generous). */
-
-      if (exec_tmout < hang_tmout) {
-        // re-run tracer to test new time out: hang_tmout
-        start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); 
-        write_to_testcase(mem, len);
-        new_fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, hang_tmout); // new timeout
-        stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD);
-
-        /* A corner case that one user reported bumping into: increasing the
-           timeout actually uncovers a crash. Make sure we don't discard it if
-           so. */
-
-        if (!stop_soon && new_fault == FAULT_CRASH) goto keep_as_crash;
-
-        if (stop_soon || new_fault != FAULT_TMOUT) return keeping;
-
-      }
-
-#ifndef SIMPLE_FILES
-
-      fn = alloc_printf("%s/hangs/id:%06llu,%s", out_dir,
-                        unique_hangs, describe_op(0));
-
-#else
-
-      fn = alloc_printf("%s/hangs/id_%06llu", out_dir,
-                        unique_hangs);
-
-#endif /* ^!SIMPLE_FILES */
-
-      unique_hangs++;
-
-      last_hang_time = get_cur_time();
-
-      break;
-
     case FAULT_CRASH:
-      // // crash found by oracle, so run tracer
-      // start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); 
-      // write_to_testcase(mem, len);
-      // new_fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, exec_tmout);
-      // stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD);
+      // binary crashes while the oracle finds a new edge; may caused by fork() in original target binary
+      if ((oracleExitCode == COND_COVERAGE) || (oracleExitCode == INDIRECT_COVERAGE)){
+        total_fork_crash ++;
+        return keeping;
+      }
 
 keep_as_crash:
 
       /* This is handled in a manner roughly similar to timeouts,
          except for slightly different limits and no need to re-run test
          cases. */
-
       total_crashes++;
-
+      
       if (unique_crashes >= KEEP_UNIQUE_CRASH) return keeping;
 
-      if (!dumb_mode) {
-
-#ifdef __x86_64__
-        simplify_trace((u64*)trace_bits);
-#else
-        simplify_trace((u32*)trace_bits);
-#endif /* ^__x86_64__ */
-
-        if (!has_new_bits(virgin_crash)) return keeping;
-
+      
+      write_to_testcase(mem, len);
+      new_fault = run_target(&crasher_child_PID, &crasher_fsrv_ctlFD, &crasher_fsrv_stFD, exec_tmout);
+      
+      crashExitCode = trace_bits[MAP_SIZE + BYTES_FLAGS + FLAG_LOOP];
+   
+      
+      //(new_fault != FAULT_COND) && (new_fault !=FAULT_INDIRECT) && 
+      if ((crashExitCode != COND_COVERAGE) && (crashExitCode != INDIRECT_COVERAGE)){ //no new crash
+        return keeping;
       }
+
+      // found a new crash, run tracer
+      start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); 
+      write_to_testcase(mem, len);
+      new_fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, exec_tmout);
+      stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD);
+
+      // modify crasher to update coverage information;
+      stop_forkserver(&crasher_fsrv_PID, &crasher_fsrv_ctlFD, &crasher_fsrv_stFD);
+      jump_inst(crasher_path, crasher_inst_begin, crasher_inst_end, 2);
+      start_forkserver(&crasher_fsrv_PID, &crasher_fsrv_ctlFD, &crasher_fsrv_stFD, FORKSRV_FD, crasher_argv); 
+      
 
       if (!unique_crashes) write_crash_readme();
 
@@ -3295,6 +3424,12 @@ keep_as_crash:
       last_crash_time = get_cur_time();
       last_crash_execs = total_execs;
 
+      break;
+
+    case FAULT_TMOUT:
+keep_as_tmout:
+      total_tmouts++;
+      return keeping;
       break;
 
     case FAULT_ERROR: FATAL("Unable to execute target application");
@@ -3541,17 +3676,17 @@ static void maybe_update_plot_file(double bitmap_cvg, double eps) {
      execs_per_sec */
 
   fprintf(plot_file, 
-          "%llu, %llu, %u, %u, %u, %u, %0.02f%%, %llu, %llu, %u, %0.02f, %llu, %u, %llu, %i, %i, %llu, %i, %llu\n",
+          "%llu, %llu, %u, %u, %u, %u, %0.02f%%, %llu, %llu, %u, %0.02f, %u, %llu, %u, %llu, %i, %i, %llu, %i, %llu\n",
           get_cur_time() / 1000, queue_cycle - 1, current_entry, queued_paths,
           pending_not_fuzzed, pending_favored, bitmap_cvg, unique_crashes,
           unique_hangs, max_depth, eps, 
-
+          queued_with_bits,
           total_execs,
-          calib_execs, 
-          trim_execs,
+          calib_execs,
+          trim_execs,   
 
           total_traced,
-          total_queued,
+          total_fork_crash,
 
           total_tmouts,
           trace_tmouts,
@@ -4278,9 +4413,10 @@ static void show_stats(void) {
   SAYF(bVR bH cLBL bSTOP "  CSI stats  " bSTG bH10
        bH10 bH2 bH2 bSTOP cLBL " queueing info " bSTG bH20 bH5 bVL "\n");
 
-  // sprintf(tmp, "%d,%d -> %d,%d   ", trace_bits[MAP_SIZE], trace_bits[MAP_SIZE + 1], 
-  //                               trace_bits[MAP_SIZE + MARK_SIZE], trace_bits[MAP_SIZE + MARK_SIZE + 1]);
- sprintf(tmp, "%x", queue_cur->path_cksum);
+  
+//  sprintf(tmp, "%x", queue_cur->path_cksum);
+//   SAYF(bV bSTOP " path idens : %s%-24s" bSTG, cRST, tmp);
+sprintf(tmp, "%x", queue_cur->path_cksum);
   SAYF(bV bSTOP " path idens : %s%-24s" bSTG, cRST, tmp);
 
   SAYF(bSTOP "  trace tmouts (discarded) : " cRST "%-10s " bSTG bV "\n", DI(trace_tmouts));
@@ -4597,8 +4733,6 @@ static u8 trim_case(struct queue_entry* q, u8* in_buf) {
   /* Continue until the number of steps gets too high or the stepover
      gets too small. */
     
-  // trim() use different inputs, and may find new edges, so use oracle;  rosen
-  //start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); //rosen
   start_forkserver(&trimmer_fsrv_PID, &trimmer_fsrv_ctlFD, &trimmer_fsrv_stFD, FORKSRV_FD, trimmer_argv); //rosen
   
   while (remove_len >= MAX(len_p2 / TRIM_END_STEPS, TRIM_MIN_BYTES)) {
@@ -4617,7 +4751,6 @@ static u8 trim_case(struct queue_entry* q, u8* in_buf) {
 
       write_with_gap(in_buf, q->len, remove_pos, trim_avail);
 
-      //fault = run_target(&tracer_child_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, exec_tmout); //rosen
       fault = run_target(&trimmer_child_PID, &trimmer_fsrv_ctlFD, &trimmer_fsrv_stFD, exec_tmout); //rosen
       trim_execs++;
 
@@ -4690,7 +4823,6 @@ abort_trimming:
 
   bytes_trim_out += q->len;
 
-  //stop_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD);//rosen
   stop_forkserver(&trimmer_fsrv_PID, &trimmer_fsrv_ctlFD, &trimmer_fsrv_stFD);//rosen
   return fault;
 
@@ -6885,6 +7017,9 @@ static void handle_stop_sig(int sig) {
   if (oracle_fsrv_PID > 0) kill(oracle_fsrv_PID, SIGKILL);
   if (trimmer_child_PID > 0) kill(trimmer_child_PID, SIGKILL);
   if (trimmer_fsrv_PID > 0) kill(trimmer_fsrv_PID, SIGKILL);
+  if (crasher_child_PID > 0) kill(crasher_child_PID, SIGKILL);
+  if (crasher_fsrv_PID > 0) kill(crasher_fsrv_PID, SIGKILL);
+
 
 }
 
@@ -6916,6 +7051,10 @@ static void handle_timeout(int sig){
     child_timed_out = 1; 
     kill(trimmer_child_PID, SIGKILL);
   }
+  if (crasher_child_PID > 0) {
+    child_timed_out = 1; 
+    kill(crasher_child_PID, SIGKILL);
+  }
   if (oracle_child_PID == -1 && oracle_fsrv_PID > 0) {
     child_timed_out = 1; 
     kill(oracle_fsrv_PID, SIGKILL);
@@ -6928,6 +7067,11 @@ static void handle_timeout(int sig){
     child_timed_out = 1; 
     kill(trimmer_fsrv_PID, SIGKILL);
   }
+  if (crasher_child_PID == -1 && crasher_fsrv_PID > 0) {
+    child_timed_out = 1; 
+    kill(crasher_fsrv_PID, SIGKILL);
+  }
+
 }
 
 
@@ -7219,12 +7363,7 @@ EXP_ST void setup_dirs_fds(void) {
   plot_file = fdopen(fd, "w");
   if (!plot_file) PFATAL("fdopen() failed");
 
-  fprintf(plot_file, "# unix_time, cycles_done, cur_path, paths_total, "
-                     "pending_total, pending_favs, map_size, unique_crashes, "
-                     "unique_hangs, max_depth, execs_per_sec, "
-                     "execs_done, calib_execs, trim_execs, "
-                     "total_traced, total_queued, "
-                     "total_tmouts, trace_tmouts, total_crashes"
+  fprintf(plot_file, "# total_seeds, total_edges "
                      "\n");
 }
 
@@ -7787,27 +7926,24 @@ int main(int argc, char** argv) {
 
   setup_args(argc, argv); //rosen
 
-  ACTF("Setting up instrumentation...");
-  setup_instruments_ids();
-  if (stop_soon) goto stop_fuzzing;
-  OKF("Successfully set up instrumentation!");
+  // ACTF("Setting up instrumentation...");
+  // setup_instruments_ids();
+  // if (stop_soon) goto stop_fuzzing;
+  // OKF("Successfully set up instrumentation!");
 
-  
-  // ACTF("Starting tracer forkserver...");
-  // start_forkserver(&tracer_fsrv_PID, &tracer_fsrv_ctlFD, &tracer_fsrv_stFD, FORKSRV_FD, tracer_argv); 
-
-
-  // ACTF("Starting trimmer forkserver...");
-  // start_forkserver(&trimmer_fsrv_PID, &trimmer_fsrv_ctlFD, &trimmer_fsrv_stFD, FORKSRV_FD, trimmer_argv);
+  setup_inst_addrs();
   
   //setup path marks before dry_run() executing initial seeds
   ACTF("Setting up initial path marks...");
   init_path_marks();
 
-  ACTF("Starting oracle forkserver...");
-  start_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD, FORKSRV_FD, oracle_argv); 
+  // ACTF("Starting oracle forkserver...");
+  // start_forkserver(&oracle_fsrv_PID, &oracle_fsrv_ctlFD, &oracle_fsrv_stFD, FORKSRV_FD, oracle_argv); 
 
-  perform_dry_run();
+  // ACTF("Starting crasher forkserver...");
+  // start_forkserver(&crasher_fsrv_PID, &crasher_fsrv_ctlFD, &crasher_fsrv_stFD, FORKSRV_FD, crasher_argv);
+
+  // perform_dry_run();
 
 
   start_time = get_cur_time();
@@ -7831,65 +7967,65 @@ int main(int argc, char** argv) {
     if (stop_soon) goto stop_fuzzing;
   }
 
-  while (1) {
+  // while (1) {
 
-    u8 skipped_fuzz;
+  //   u8 skipped_fuzz;
 
-    cull_queue();
+  //   cull_queue();
 
-    if (!queue_cur) {
+  //   if (!queue_cur) {
 
-      queue_cycle++;
-      current_entry     = 0;
-      cur_skipped_paths = 0;
-      queue_cur         = queue;
+  //     queue_cycle++;
+  //     current_entry     = 0;
+  //     cur_skipped_paths = 0;
+  //     queue_cur         = queue;
 
-      while (seek_to) {
-        current_entry++;
-        seek_to--;
-        queue_cur = queue_cur->next;
-      }
+  //     while (seek_to) {
+  //       current_entry++;
+  //       seek_to--;
+  //       queue_cur = queue_cur->next;
+  //     }
 
-      show_stats();
+  //     show_stats();
 
-      if (not_on_tty) {
-        ACTF("Entering queue cycle %llu.", queue_cycle);
-        fflush(stdout);
-      }
+  //     if (not_on_tty) {
+  //       ACTF("Entering queue cycle %llu.", queue_cycle);
+  //       fflush(stdout);
+  //     }
 
-      /* If we had a full queue cycle with no new finds, try
-         recombination strategies next. */
+  //     /* If we had a full queue cycle with no new finds, try
+  //        recombination strategies next. */
 
-      if (queued_paths == prev_queued) {
+  //     if (queued_paths == prev_queued) {
 
-        if (use_splicing) cycles_wo_finds++; else use_splicing = 1;
+  //       if (use_splicing) cycles_wo_finds++; else use_splicing = 1;
 
-      } else cycles_wo_finds = 0;
+  //     } else cycles_wo_finds = 0;
 
-      prev_queued = queued_paths;
+  //     prev_queued = queued_paths;
 
-      if (sync_id && queue_cycle == 1 && getenv("AFL_IMPORT_FIRST"))
-        sync_fuzzers(); 
+  //     if (sync_id && queue_cycle == 1 && getenv("AFL_IMPORT_FIRST"))
+  //       sync_fuzzers(); 
 
-    }
+  //   }
 
-    skipped_fuzz = fuzz_one();
+  //   skipped_fuzz = fuzz_one();
 
-    if (!stop_soon && sync_id && !skipped_fuzz) {
+  //   if (!stop_soon && sync_id && !skipped_fuzz) {
       
-      if (!(sync_interval_cnt++ % SYNC_INTERVAL))
-        sync_fuzzers();
+  //     if (!(sync_interval_cnt++ % SYNC_INTERVAL))
+  //       sync_fuzzers();
 
-    }
+  //   }
 
-    if (!stop_soon && exit_1) stop_soon = 2;
+  //   if (!stop_soon && exit_1) stop_soon = 2;
 
-    if (stop_soon) break;
+  //   if (stop_soon) break;
 
-    queue_cur = queue_cur->next;
-    current_entry++;
+  //   queue_cur = queue_cur->next;
+  //   current_entry++;
 
-  }
+  // }
 
   if (queue_cur) show_stats();
 
@@ -7920,6 +8056,9 @@ stop_fuzzing:
   ck_free(tracer_path);
   ck_free(oracle_path);
   ck_free(trimmer_path);//rosen
+  ck_free(crasher_path);
+  ck_free(crasher_mapping_path);
+  ck_free(oracle_mapping_path);
 
   alloc_report();
 
